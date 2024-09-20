@@ -1,0 +1,88 @@
+---
+title: "Comparison of Genome Metadata"
+author: "Kat Terwelp"
+format: html
+editor: visual
+---
+
+## Comparison of Genome Metadata
+
+## Motivation
+
+### **Goal:**
+
+-   Determine whether the two methods to acquire genome + drug metadata produce different results.
+
+### **Background:**
+
+The Two Methods
+
+```{bash}
+p3-all-genomes \
+--in taxon_id,1280 \
+--eq genome_quality,Good \
+--in genome_status,WGS,Complete | \
+p3-get-genome-drugs \
+--required resistant_phenotype \
+--required antibiotic \
+--attr $(p3-get-genome-drugs --fields | tr '\n' ',') > sau_drug1.tsv
+
+# uses the taxonID, used by Abhirupa for S.aureus
+
+p3-all-genomes \
+--eq "genome_name,Pseudomonas aeruginosa" \
+--eq genome_quality,Good \
+--in genome_status,WGS,Complete | \
+p3-get-genome-drugs \
+--required resistant_phenotype \
+--required antibiotic \
+--attr $(p3-get-genome-drugs --fields | tr '\n' ',') > pae_drug2.tsv
+
+# uses genome_name, used by Charmie for P.aeruginosa
+```
+
+### Inputs
+
+-   X_drug1: taxonID method, drug data
+
+-   X_drug2: genome_name method, drug data
+
+-   X_data: genome data from associated drug data
+
+## Analysis
+
+### Load libraries
+
+```{r}
+library(readr)
+# import tsv/text files into tibble 
+library(tidyverse)
+# dplyr for cleaning tibbles
+# ggplot for visualizing cleaned tibble
+```
+
+### Import data and clean
+
+```{r}
+
+# list all data files and deduplicate down to unique genomes
+
+tsv.ls <- list.files(pattern="_data")
+
+tibble.ls <- lapply(tsv.ls, read_tsv) 
+names(tibble.ls) <- gsub("_data.tsv", "", tsv.ls)
+
+uniq.genomes.ls <- lapply(tibble.ls, distinct)
+
+
+
+# find different genomes between these methods 
+pae.not_drug2 <- setdiff(uniq.genomes.ls$pae_drug1, uniq.genomes.ls$pae_drug2)
+pae.not_drug1 <- setdiff(uniq.genomes.ls$pae_drug2, uniq.genomes.ls$pae_drug1)
+
+sau.not_drug2 <- setdiff(uniq.genomes.ls$sau_drug1, uniq.genomes.ls$sau_drug2)
+sau.not_drug1 <- setdiff(uniq.genomes.ls$sau_drug2, uniq.genomes.ls$sau_drug1)
+
+# characterize these genomes 
+
+```
