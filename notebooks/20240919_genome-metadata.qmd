@@ -17,37 +17,21 @@ editor: visual
 
 The Two Methods
 
-```{bash}
-p3-all-genomes \
---in taxon_id,1280 \
---eq genome_quality,Good \
---in genome_status,WGS,Complete | \
-p3-get-genome-drugs \
---required resistant_phenotype \
---required antibiotic \
---attr $(p3-get-genome-drugs --fields | tr '\n' ',') > sau_drug1.tsv
+-   TaxonID or genome_name
 
-# uses the taxonID, used by Abhirupa for S.aureus
+-   Is genome_name just adding junk or is it worthwhile to keep?
 
-p3-all-genomes \
---eq "genome_name,Pseudomonas aeruginosa" \
---eq genome_quality,Good \
---in genome_status,WGS,Complete | \
-p3-get-genome-drugs \
---required resistant_phenotype \
---required antibiotic \
---attr $(p3-get-genome-drugs --fields | tr '\n' ',') > pae_drug2.tsv
+Inputs
 
-# uses genome_name, used by Charmie for P.aeruginosa
-```
+-   `metadata/` contains the following files:
 
-### Inputs
+    -   `*_data.tsv` = genome metadata
 
--   X_drug1: taxonID method, drug data
+    -   `*_drug.tsv` = drug metadata
 
--   X_drug2: genome_name method, drug data
+    -   `##_*` = taxonID version
 
--   X_data: genome data from associated drug data
+    -   `genus-species_*` = genome_name version
 
 ## Analysis
 
@@ -59,57 +43,340 @@ library(readr)
 library(tidyverse)
 # dplyr for cleaning tibbles
 # ggplot for visualizing cleaned tibble
+library(skimr)
+# for creating quick summary tables
 ```
 
 ### Import data and clean
 
+Set up variables
+
 ```{r}
+col.types.genome <- cols(genome.genome_id...1 = col_character(),
+  genome._version_ = col_double(),
+  genome.additional_metadata = col_character(), # multi-valued
+  genome.altitude = col_character(),
+  genome.antimicrobial_resistance = col_character(), # multi-valued
+  genome.antimicrobial_resistance_evidence = col_character(),
+  genome.assembly_accession = col_character(),
+  genome.assembly_method = col_character(),
+  genome.authors = col_character(),
+  genome.bioproject_accession = col_character(),
+  genome.biosample_accession = col_character(),
+  genome.biovar = col_character(),
+  genome.body_sample_site = col_character(),
+  genome.body_sample_subsite = col_character(),
+  genome.cds = col_double(),
+  genome.cds_ratio = col_double(),
+  genome.cell_shape = col_character(),
+  genome.checkm_completeness = col_double(),
+  genome.checkm_contamination = col_double(),
+  genome.chromosomes = col_double(),
+  genome.clade = col_character(),
+  genome.class = col_character(),
+  genome.coarse_consistency = col_double(),
+  genome.collection_date = col_character(),
+  genome.collection_year = col_double(),
+  genome.comments = col_character(), # multi-valued
+  genome.common_name = col_character(),
+  genome.completion_date = col_datetime(format = ""),
+  genome.contig_l50 = col_double(),
+  genome.contig_n50 = col_double(),
+  genome.contigs = col_double(),
+  genome.core_families = col_double(),
+  genome.core_family_ratio = col_double(),
+  genome.culture_collection = col_character(),
+  genome.date_inserted = col_datetime(format = ""),
+  genome.date_modified = col_datetime(format = ""),
+  genome.depth = col_character(),
+  genome.disease = col_character(), # multi-valued
+  genome.family = col_character(),
+  genome.fine_consistency = col_double(),
+  genome.gc_content = col_double(),
+  genome.genbank_accessions = col_character(),
+  genome.genetic_code = col_character(),
+  genome.genome_id...44 = col_character(), # Added multiple genome_id
+  genome.genome_length = col_double(),
+  genome.genome_name = col_character(),
+  genome.genome_quality = col_character(),
+  genome.genome_quality_flags = col_character(), # multi-valued
+  genome.genome_status = col_character(),
+  genome.genus = col_character(),
+  genome.geographic_group = col_character(),
+  genome.geographic_location = col_character(),
+  genome.gram_stain = col_character(),
+  genome.h1_clade_global = col_character(),
+  genome.h1_clade_us = col_character(),
+  genome.h3_clade = col_character(),
+  genome.h5_clade = col_character(),
+  genome.h_type = col_character(),
+  genome.habitat = col_character(),
+  genome.host_age = col_character(),
+  genome.host_common_name = col_character(),
+  genome.host_gender = col_character(),
+  genome.host_group = col_character(),
+  genome.host_health = col_character(),
+  genome.host_name = col_character(),
+  genome.host_scientific_name = col_character(),
+  genome.hypothetical_cds = col_double(),
+  genome.hypothetical_cds_ratio = col_double(),
+  genome.isolation_comments = col_character(),
+  genome.isolation_country = col_character(),
+  genome.isolation_site = col_character(),
+  genome.isolation_source = col_character(),
+  genome.kingdom = col_character(),
+  genome.lab_host = col_character(),
+  genome.latitude = col_character(),
+  genome.lineage = col_character(),
+  genome.longitude = col_character(),
+  genome.mat_peptide = col_character(),
+  genome.missing_core_family_ids = col_character(), # multi-valued
+  genome.mlst = col_character(),
+  genome.motility = col_character(),
+  genome.n_type = col_character(),
+  genome.ncbi_project_id = col_character(),
+  genome.nearest_genomes = col_character(), # multi-valued
+  genome.optimal_temperature = col_character(),
+  genome.order = col_character(),
+  genome.organism_name = col_character(),
+  genome.other_clinical = col_character(), # multi-valued
+  genome.other_environmental = col_character(), # multi-valued
+  genome.other_names = col_character(),
+  genome.other_typing = col_character(), # multi-valued
+  genome.outgroup_genomes = col_character(), # multi-valued
+  genome.owner = col_character(),
+  genome.oxygen_requirement = col_character(),
+  genome.p2_genome_id = col_double(),
+  genome.partial_cds = col_double(),
+  genome.partial_cds_ratio = col_double(),
+  genome.passage = col_character(),
+  genome.pathovar = col_character(),
+  genome.patric_cds = col_double(),
+  genome.ph1n1_like = col_character(),
+  genome.phenotype = col_character(),
+  genome.phylum = col_character(),
+  genome.plasmids = col_double(),
+  genome.plfam_cds = col_double(),
+  genome.plfam_cds_ratio = col_double(),
+  genome.public = col_logical(),
+  genome.publication = col_character(),
+  genome.reference_genome = col_character(),
+  genome.refseq_accessions = col_character(),
+  genome.refseq_cds = col_double(),
+  genome.refseq_project_id = col_character(),
+  genome.rrna = col_double(),
+  genome.salinity = col_character(),
+  genome.season = col_character(),
+  genome.segment = col_character(),
+  genome.segments = col_character(),
+  genome.sequencing_centers = col_character(),
+  genome.sequencing_depth = col_character(),
+  genome.sequencing_platform = col_character(),
+  genome.sequencing_status = col_character(),
+  genome.serovar = col_character(),
+  genome.species = col_character(),
+  genome.sporulation = col_character(),
+  genome.sra_accession = col_character(),
+  genome.state_province = col_character(),
+  genome.strain = col_character(),
+  genome.subclade = col_character(),
+  genome.subtype = col_character(),
+  genome.superkingdom = col_character(),
+  genome.taxon_id = col_double(),
+  genome.taxon_lineage_ids = col_character(),
+  genome.taxon_lineage_names = col_character(),
+  genome.taxonomy = col_character(),
+  genome.temperature_range = col_character(),
+  genome.text = col_character(), # multi-valued
+  genome.trna = col_double(),
+  genome.type_strain = col_character(),
+  genome.user_read = col_character(), # multi-valued
+  genome.user_write = col_character() # multi-valued
+)
 
-# list all data files and deduplicate down to unique genomes
 
-tsv.ls <- list.files(pattern="_data")
-
-tibble.ls <- lapply(tsv.ls, read_tsv) 
-names(tibble.ls) <- gsub("_data.tsv", "", tsv.ls)
-
-problems.ls <- lapply(tibble.ls, problems)
-
-uniq.genomes.ls <- lapply(tibble.ls, distinct)
-
-
-uniq.genomes.ls <- lapply(tibble.ls, function(tbl) 
-  tbl %>% mutate(genome.publication = as.character(genome.publication)))
-
-
-# find different genomes between these methods 
-pae.not_drug2 <- setdiff(uniq.genomes.ls$pae_drug1, uniq.genomes.ls$pae_drug2)
-pae.not_drug1 <- setdiff(uniq.genomes.ls$pae_drug2, uniq.genomes.ls$pae_drug1)
-
-sau.not_drug2 <- setdiff(uniq.genomes.ls$sau_drug1, uniq.genomes.ls$sau_drug2)
-sau.not_drug1 <- setdiff(uniq.genomes.ls$sau_drug2, uniq.genomes.ls$sau_drug1)
-
-# characterize these genomes 
-
+col.types.drug <- cols(
+  genome.genome_id = col_character(),
+  genome_drug.genome_id = col_character(),
+  genome_drug.genome_name = col_character(),
+  genome_drug.taxon_id = col_double(),
+  genome_drug.antibiotic = col_character(),
+  genome_drug.resistant_phenotype = col_character(),
+  genome_drug.measurement = col_character(),
+  genome_drug.measurement_sign = col_character(),
+  genome_drug.measurement_value = col_character(),
+  genome_drug.measurement_unit = col_character(),
+  genome_drug.laboratory_typing_method = col_character(),
+  genome_drug.laboratory_typing_method_version = col_character(),
+  genome_drug.laboratory_typing_platform = col_character(),
+  genome_drug.vendor = col_character(),
+  genome_drug.computational_method = col_character(),
+  genome_drug.computational_method_version = col_character(),
+  genome_drug.computational_method_performance = col_character(),
+  genome_drug.testing_standard = col_character(),
+  genome_drug.testing_standard_year = col_double(),
+  genome_drug.source = col_character(),
+  genome_drug.pmid = col_double(), # multi-valued
+  genome_drug.evidence = col_character(),
+  genome_drug.text = col_character(), # multi-valued
+  genome_drug._version_ = col_double(),
+  genome_drug.date_inserted = col_datetime(format = ""),
+  genome_drug.date_modified = col_datetime(format = ""),
+  genome_drug.public = col_logical(),
+  genome_drug.owner = col_character(),
+  genome_drug.user_read = col_character(), # multi-valued
+  genome_drug.user_write = col_character() # multi-valued
+)
 ```
 
 ```{r}
-# tsv test
-file <- "pae_drug1_data.tsv"
 
-test <- read.table(file, 
-           sep = "\t", 
-           header = TRUE, 
-           fill = TRUE, 
-           quote = "")
+projDir="/projects/kterwelp@xsede.org/20240917_BV-BRC-genomes/metadata/"
+# list all data files and deduplicate down to unique genomes
+data.tsv.ls <- list.files(path = projDir, 
+                          pattern = "_data.tsv",
+                          full.names = TRUE)
 
+drug.tsv.ls <- list.files(path = projDir, 
+                          pattern = "_drug.tsv",
+                          full.names = TRUE)
 
-test2 <- read_tsv(file)
+data.tbls <- lapply(data.tsv.ls, function(tsv) read_tsv(tsv, col_types = col.types.genome))
+names(data.tbls) <- data.tsv.ls %>%
+  basename() %>% 
+  str_replace_all("_data.tsv", "") %>% 
+  str_replace_all("-", "_") %>% 
+  paste0("data_", .)
 
-d.test <- test %>% distinct()
+drug.tbls <- lapply(drug.tsv.ls, function(tsv) read_tsv(tsv, col_types = col.types.drug))
+names(drug.tbls) <- drug.tsv.ls %>% 
+  basename() %>% 
+  str_replace_all("_drug.tsv", "") %>% 
+  str_replace_all("-", "_") %>% 
+  paste0("drug_", .)
 
-d.test2 <- test2 %>% distinct()
+problems(drug.tbls$drug_1280)
+unique(drug.tbls$drug_1280$genome_drug.computational_method_performance)
+# shifted at the computational methods section for 6,000 lines. They have Adaboost twice, at computational_method_performance, so shifted beyond that line. Bonus is that we don't want that crap! 
+```
 
-d.test2 <- d.test2 %>% 
-  mutate(duplicated = duplicated(genome.genome_id...1))
+### Drug Tbl Comparison
+
+Combine all tables together
+
+```{r}
+shrt_names <- names(drug.tbls) %>% str_replace_all("drug_", "")
+test.drug.tbls <- drug.tbls %>% map2(shrt_names, ~ mutate(.x, id_input = .y))
+
+test.drug.tbl <- bind_rows(test.drug.tbls)
+
+skim.drug.tbl <- skim(test.drug.tbl)
+# creates summary tibble of all columns
+
+```
+
+Filter to remove any computational methods and clean tibble
+
+```{r}
+unique(test.drug.tbl$genome_drug.computational_method)
+# we want to remove anything that is "AdaBoost Classifier" 
+
+filt.drug.tbl <- test.drug.tbl %>%
+  filter(genome_drug.computational_method != "AdaBoost Classifier" | is.na(genome_drug.computational_method))
+# this removed 200,000 lines
+
+unique(filt.drug.tbl$genome_drug.computational_method)
+
+unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
+# we don't want "Computational Prediction" 
+
+filt.drug.tbl <- filt.drug.tbl %>% 
+  filter(genome_drug.laboratory_typing_method != "Computational Prediction" | is.na(genome_drug.laboratory_typing_method))
+
+unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
+# we want to change "missing" to "NA" because they are the same
+
+filt.drug.tbl <- filt.drug.tbl %>% 
+  mutate(genome_drug.laboratory_typing_method = na_if(genome_drug.laboratory_typing_method, "missing"))
+
+unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
+
+flt.skim.drug.tbl <- skim(filt.drug.tbl)
+
+unique(filt.drug.tbl$genome_drug.resistant_phenotype)
+# unfortunately there are some NAs here which we cannot use
+
+filt.drug.tbl <- filt.drug.tbl %>% 
+  filter(!is.na(genome_drug.resistant_phenotype))
+
+unique(filt.drug.tbl$genome_drug.resistant_phenotype)
+# we also want to change "nonsusceptible" to "resistant" 
+
+filt.drug.tbl <- filt.drug.tbl %>% 
+  mutate(genome_drug.resistant_phenotype = case_when(genome_drug.resistant_phenotype == "Nonsusceptible" ~ "Resistant", 
+                                                     .default = genome_drug.resistant_phenotype))
+
+unique(filt.drug.tbl$genome_drug.resistant_phenotype)
+
+# do any of the columns only have NA?
+
+na_columns <- filt.drug.tbl %>%
+  summarise(across(everything(), ~ all(is.na(.)))) %>%
+  gather(key = "column", value = "all_na") %>%
+  filter(all_na) %>%
+  pull(column)
+
+na_columns
+# we will remove all these columns from our dataset
+
+length(na_columns)
+length(colnames(filt.drug.tbl))
+
+filt.drug.tbl <- filt.drug.tbl %>% 
+  select(-any_of(na_columns))
+
+length(colnames(filt.drug.tbl))
+colnames(filt.drug.tbl)
+
+```
+
+Visualize tbl
+
+```{r}
+# how many different drugs for each input_id? 
+
+unique(filt.drug.tbl$genome_drug.antibiotic)
+# there are a LOT of antibiotics
+
+filt.drug.tbl %>% 
+  filter(id_input == "Staphylococcus_aureus" | id_input == "Pseudomonas_aeruginosa") %>% 
+  group_by(id_input, genome_drug.antibiotic) %>% 
+  summarise(count = n()) %>% 
+  filter(count > 100) %>% # more than 100 entries
+  ungroup() %>% 
+  group_by(genome_drug.antibiotic) %>% 
+  filter(n() > 1) %>% # exist for both S.aureus and P.aeruginosa
+  ungroup()
+
+# these could be good candidates for AMR models
+## Ciprofloxacin
+## Gentamicin
+## Levofloxacin
+
+## Cipro + Levo are both quinolones (contain ending "floxacin")
+
+## Gentamicin is an aminoglycoside antibiotic (contain ending "mycin", "micin", "kacin")
+
+# how many quinolones do both species have? 
+
+filt.drug.tbl %>% 
+  filter(id_input == "Staphylococcus_aureus" | id_input == "Pseudomonas_aeruginosa") %>% 
+  mutate(antibiotic_class = case_when(str_detect(genome_drug.antibiotic, "floxacin") ~ "quinolone", 
+                                      .default = genome_drug.antibiotic)) %>% 
+  filter(antibiotic_class == "quinolone") %>% 
+  group_by(id_input, genome_drug.resistant_phenotype) %>% 
+  summarise(count = n())
+
+# Is 1618 and 3303 enough?
 
 ```
