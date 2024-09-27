@@ -7,7 +7,7 @@ taxonIDs=(287 1280)
 taxonNames=("Staphylococcus aureus" "Pseudomonas aeruginosa")
 
 # set up automatic variables
-drugFields="$(p3-get-genome-drugs --fields | tr '\n' ',')"
+drugFields="$(p3-get-genome-drugs --fields | sed 's/([^)]*)//g' | tr '\n' ',' | sed 's/ ,/,/g')"
 dataFields="$(p3-get-genome-data --fields | sed 's/([^)]*)//g' | tr '\n' ',' | sed 's/ ,/,/g')"
 
 # acquire list of genomes using both methods
