@@ -72,8 +72,13 @@ tsv.ls <- list.files(pattern="_data")
 tibble.ls <- lapply(tsv.ls, read_tsv) 
 names(tibble.ls) <- gsub("_data.tsv", "", tsv.ls)
 
+problems.ls <- lapply(tibble.ls, problems)
+
 uniq.genomes.ls <- lapply(tibble.ls, distinct)
 
+
+uniq.genomes.ls <- lapply(tibble.ls, function(tbl) 
+  tbl %>% mutate(genome.publication = as.character(genome.publication)))
 
 
 # find different genomes between these methods 
@@ -84,5 +89,27 @@ sau.not_drug2 <- setdiff(uniq.genomes.ls$sau_drug1, uniq.genomes.ls$sau_drug2)
 sau.not_drug1 <- setdiff(uniq.genomes.ls$sau_drug2, uniq.genomes.ls$sau_drug1)
 
 # characterize these genomes 
+
+```
+
+```{r}
+# tsv test
+file <- "pae_drug1_data.tsv"
+
+test <- read.table(file, 
+           sep = "\t", 
+           header = TRUE, 
+           fill = TRUE, 
+           quote = "")
+
+
+test2 <- read_tsv(file)
+
+d.test <- test %>% distinct()
+
+d.test2 <- test2 %>% distinct()
+
+d.test2 <- d.test2 %>% 
+  mutate(duplicated = duplicated(genome.genome_id...1))
 
 ```
