@@ -351,8 +351,18 @@ unique(filt.drug.tbl$genome_drug.antibiotic)
 filt.drug.tbl %>% 
   filter(id_input == "Staphylococcus_aureus" | id_input == "Pseudomonas_aeruginosa") %>% 
   group_by(id_input, genome_drug.antibiotic) %>% 
-  summarise(count = n()) %>% 
+  summarise(count = n(), uniq.genomes = length(unique(genome.genome_id))) %>% 
   filter(count > 100) %>% # more than 100 entries
+  ungroup() %>% 
+  group_by(genome_drug.antibiotic) %>% 
+  filter(n() > 1) %>% # exist for both S.aureus and P.aeruginosa
+  ungroup()
+
+filt.drug.tbl %>% 
+  filter(id_input == "Staphylococcus_aureus" | id_input == "Pseudomonas_aeruginosa") %>% 
+  group_by(id_input, genome_drug.antibiotic) %>% 
+  summarise(count = n(), uniq.genomes = length(unique(genome.genome_id))) %>% 
+  filter(count > 50) %>% # more than 50 entries
   ungroup() %>% 
   group_by(genome_drug.antibiotic) %>% 
   filter(n() > 1) %>% # exist for both S.aureus and P.aeruginosa
@@ -375,8 +385,47 @@ filt.drug.tbl %>%
                                       .default = genome_drug.antibiotic)) %>% 
   filter(antibiotic_class == "quinolone") %>% 
   group_by(id_input, genome_drug.resistant_phenotype) %>% 
-  summarise(count = n())
+  summarise(count = n(), uniq.genomes = length(unique(genome.genome_id)))
 
-# Is 1618 and 3303 enough?
+# Is 1618 and 3303 enough? - yes according to Janani
+
+
+# how many aminoglycosides do both species have? 
+aminoglyc.ls <- c("gentamicin", "tobramycin", "amikacin", "neomycin", "plazomicin", "streptomycin", "paromomycin")
+# aminoglycoside antibiotics 
+aminoglyc_pattern <- paste(aminoglyc.ls, collapse = "|")
+# converted into regex pattern
+
+filt.drug.tbl.anti <- filt.drug.tbl %>%
+    filter(id_input == "Staphylococcus_aureus" | id_input == "Pseudomonas_aeruginosa") %>% 
+    mutate(antibiotic_class = case_when(str_detect(genome_drug.antibiotic, "floxacin") ~ "quinolone", 
+                                        str_detect(genome_drug.antibiotic, aminoglyc_pattern) ~ "aminoglycoside",
+                                      .default = genome_drug.antibiotic)) %>% 
+  filter(antibiotic_class == "quinolone" | antibiotic_class == "aminoglycoside")
+
+filt.drug.tbl.anti %>% 
+  filter(antibiotic_class == "aminoglycoside") %>% 
+  group_by(id_input, genome_drug.resistant_phenotype) %>% 
+  summarise(count = n(), uniq.genomes = length(unique(genome.genome_id)))
+
+
+# are the genomes that are resistant to one drug, also resistant to others? 
+
+filt.drug.tbl.anti %>% 
+  ungroup() %>% 
+  group_by(genome.genome_id) %>%
+  filter(antibiotic_class == "quinolone") %>% 
+  summarise(count = n(), uniq.drugs = length(unique(genome_drug.antibiotic)), uniq.resistance = length(unique(genome_drug.resistant_phenotype)), uniq.resistant.ls <- unique(genome_drug.resistant_phenotype)) %>% 
+  filter(uniq.resistance > 1)
+
+  
+```
+
+I've found some drugs of interest, how do the genomes look?
+
+```{r}
+# genome list for aminoglycosides 
+
+# genome list for quinolones 
 
 ```
