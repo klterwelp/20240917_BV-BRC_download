@@ -231,6 +231,7 @@ col.types.drug <- cols(
 
 ```{r}
 
+# import data into tibbles 
 projDir="/projects/kterwelp@xsede.org/20240917_BV-BRC-genomes/metadata/"
 # list all data files and deduplicate down to unique genomes
 data.tsv.ls <- list.files(path = projDir, 
@@ -258,6 +259,7 @@ names(drug.tbls) <- drug.tsv.ls %>%
 problems(drug.tbls$drug_1280)
 unique(drug.tbls$drug_1280$genome_drug.computational_method_performance)
 # shifted at the computational methods section for 6,000 lines. They have Adaboost twice, at computational_method_performance, so shifted beyond that line. Bonus is that we don't want that crap! 
+
 ```
 
 ### Drug Tbl Comparison
@@ -266,11 +268,11 @@ Combine all tables together
 
 ```{r}
 shrt_names <- names(drug.tbls) %>% str_replace_all("drug_", "")
-test.drug.tbls <- drug.tbls %>% map2(shrt_names, ~ mutate(.x, id_input = .y))
+drug.tbls <- drug.tbls %>% map2(shrt_names, ~ mutate(.x, id_input = .y))
 
-test.drug.tbl <- bind_rows(test.drug.tbls)
+drug.tbl <- bind_rows(drug.tbls)
 
-skim.drug.tbl <- skim(test.drug.tbl)
+skim.drug.tbl <- skim(drug.tbl)
 # creates summary tibble of all columns
 
 ```
@@ -278,9 +280,10 @@ skim.drug.tbl <- skim(test.drug.tbl)
 Filter to remove any computational methods and clean tibble
 
 ```{r}
-unique(test.drug.tbl$genome_drug.computational_method)
+unique(drug.tbl$genome_drug.computational_method)
 # we want to remove anything that is "AdaBoost Classifier" 
 
+# remove anything computational
 filt.drug.tbl <- test.drug.tbl %>%
   filter(genome_drug.computational_method != "AdaBoost Classifier" | is.na(genome_drug.computational_method))
 # this removed 200,000 lines
@@ -289,6 +292,7 @@ unique(filt.drug.tbl$genome_drug.computational_method)
 
 unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
 # we don't want "Computational Prediction" 
+
 
 filt.drug.tbl <- filt.drug.tbl %>% 
   filter(genome_drug.laboratory_typing_method != "Computational Prediction" | is.na(genome_drug.laboratory_typing_method))
@@ -301,8 +305,7 @@ filt.drug.tbl <- filt.drug.tbl %>%
 
 unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
 
-flt.skim.drug.tbl <- skim(filt.drug.tbl)
-
+# remove NAs for drug resistance phenotypes
 unique(filt.drug.tbl$genome_drug.resistant_phenotype)
 # unfortunately there are some NAs here which we cannot use
 
@@ -397,7 +400,6 @@ aminoglyc_pattern <- paste(aminoglyc.ls, collapse = "|")
 # converted into regex pattern
 
 filt.drug.tbl.anti <- filt.drug.tbl %>%
-    filter(id_input == "Staphylococcus_aureus" | id_input == "Pseudomonas_aeruginosa") %>% 
     mutate(antibiotic_class = case_when(str_detect(genome_drug.antibiotic, "floxacin") ~ "quinolone", 
                                         str_detect(genome_drug.antibiotic, aminoglyc_pattern) ~ "aminoglycoside",
                                       .default = genome_drug.antibiotic)) %>% 
@@ -418,14 +420,148 @@ filt.drug.tbl.anti %>%
   summarise(count = n(), uniq.drugs = length(unique(genome_drug.antibiotic)), uniq.resistance = length(unique(genome_drug.resistant_phenotype)), uniq.resistant.ls <- unique(genome_drug.resistant_phenotype)) %>% 
   filter(uniq.resistance > 1)
 
+## within the same class, the same genome can be resistant or susceptible
+
   
 ```
 
+### Genome Metadata Comparison
+
 I've found some drugs of interest, how do the genomes look?
 
-```{r}
-# genome list for aminoglycosides 
+**Set up genome table**
 
-# genome list for quinolones 
+```{r}
+# combine genome data into combined table 
+shrt_names <- names(data.tbls) %>% str_replace_all("data_", "")
+# create column id_input for how they got their id
+test.data.tbls <- data.tbls %>% map2(shrt_names, ~ mutate(.x, id_input = .y))
+# combine into one table
+data.tbl <- bind_rows(test.data.tbls)
+
+skim.data.tbl <- skim(data.tbl)
+# some of these columns are entirely or mostly empty, let's remove those
+na_columns <- data.tbl %>%
+  summarise(across(everything(), ~ all(is.na(.)))) %>%
+  gather(key = "column", value = "all_na") %>%
+  filter(all_na) %>%
+  pull(column)
+
+na_columns
+# we will remove all these columns from our dataset
+# 31 columns in total are entirely empty
+
+length(na_columns)
+length(colnames(data.tbl))
+
+data.tbl <- data.tbl %>% 
+  select(-any_of(na_columns))
+
+length(colnames(data.tbl))
+colnames(data.tbl)
+# 110 columns left 
+
+# some of the columns are mostly empty and will not be used, let's remove those
+
+mostly_na_columns <- skim.data.tbl %>% 
+    filter(complete_rate < 0.05) %>% # select variables that have <5% completion
+  pull(skim_variable)
+
+mostly_na_columns
+# 54 columns 
+
+data.tbl <- data.tbl %>% 
+  select(-any_of(mostly_na_columns))
+
+length(colnames(data.tbl))
+# 87 columns left 
+
+# keep only one genomeID column 
+data.tbl <- data.tbl %>% 
+  select(-genome.genome_id...44)
+
+data.tbl <- data.tbl %>% 
+  rename(genome.genome_id = genome.genome_id...1) #rename column as genome.genome_id
+
+```
+
+**What genomes are different between taxonID or genome_name**
+
+```{r}
+# add variable "id_input.type" 
+
+# sets id_input.type as taxonID if id_input is numeric, otherwise genome_name
+data.tbl <- data.tbl %>% 
+  mutate(id_input.type = case_when(suppressWarnings(!is.na(as.numeric(id_input))) ~ "taxonID", 
+                                                     .default = "genome_name"))
+
+# check that it worked: 
+data.tbl %>% filter(id_input.type == "taxonID") %>% pull(id_input) %>% unique()
+data.tbl %>% filter(id_input.type == "genome_name") %>% pull(id_input) %>% unique()
+
+# what rows are different between taxonID and genome_name? 
+
+taxonID.data.tbl <- data.tbl %>% filter(id_input.type == "taxonID")
+genomeName.data.tbl <-  data.tbl %>% filter(id_input.type == "genome_name")
+
+# extract genomes
+taxonID.genomes <- taxonID.data.tbl %>% pull(genome.genome_id)
+genomeName.genomes <- genomeName.data.tbl %>% pull(genome.genome_id)
+
+# genomes only in taxonID
+taxonID.only <- setdiff(taxonID.genomes, genomeName.genomes)
+# only two genomes are taxonID only 
+genomeName.only <- setdiff(genomeName.genomes, taxonID.genomes)
+# 4457 genomes are in genomeName only
+
+taxonID.data.tbl <- taxonID.data.tbl %>% filter(genome.genome_id %in% taxonID.only)
+taxonID.data.tbl %>% pull(genome.species)
+
+genomeName.data.tbl <- genomeName.data.tbl %>% filter(genome.genome_id %in% genomeName.only)
+skim.genomeName.data.tbl <- skim(genomeName.data.tbl)
+genomeName.data.tbl %>% pull(genome.species) %>% unique()
+# interestingly, there are several staphylococcus species, what happens if I remove those? 
+
+genomeName.data.tbl %>% filter(!genome.species %in% c("Pseudomonas aeruginosa", "Staphylococcus aureus")) %>% pull(genome.genome_id) %>% length()
+# 4452 are either P.aeuringosa or S.aurues, so only 5 are these other Staph species
+
+genomeName.data.tbl.alt <- genomeName.data.tbl %>% filter(!genome.species %in% c("Pseudomonas aeruginosa","Staphylococcus aureus")) #not the expected genome.species
+
+# interestingly these genome common names are "staphylococcus aureus
+# going to ignore since it's only five. The rest look alright! Going to stick with genomeName data from now on. 
+
+
+```
+
+**How many unique genomes do we have?**
+
+```{r}
+# total genomes from each type originally 
+filt.drug.tbl %>% 
+  group_by(id_input) %>% 
+  summarize(uniq.genomes = length(unique(genome.genome_id)), uniq.anti = length(unique(genome_drug.antibiotic)), rows = n())
+
+# 287 taxonID for P.a
+# 1280 taxonID for S.a
+
+# let's also look at the original raw data
+test.drug.tbl %>% 
+  group_by(id_input) %>% 
+  summarize(uniq.genomes = length(unique(genome.genome_id)), uniq.anti = length(unique(genome_drug.antibiotic)), rows = n())
+
+## after filtering we're losing more than half of the data 
+
+
+```
+
+**Combine genome data with drug**
+
+```{r}
+
+# can I combine now? 
+
+joined.tbl <- inner_join(filt.drug.tbl, data.tbl, relationship = "many-to-many")
+
+test <- inner_join(test.drug.tbl, data.tbl, relationship = "many-to-many")
 
 ```
