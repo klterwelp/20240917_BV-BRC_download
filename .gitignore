@@ -4,3 +4,6 @@
 .Ruserdata
 /metadata
 /log
+/genomes
+/*.tsv
+/*.out
