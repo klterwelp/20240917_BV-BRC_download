@@ -40,6 +40,8 @@ Inputs
 ```{r}
 library(readr)
 # import tsv/text files into tibble 
+library(readxl)
+# import excel files into tibble
 library(tidyverse)
 # dplyr for cleaning tibbles
 # ggplot for visualizing cleaned tibble
@@ -258,7 +260,7 @@ names(drug.tbls) <- drug.tsv.ls %>%
 
 problems(drug.tbls$drug_1280)
 unique(drug.tbls$drug_1280$genome_drug.computational_method_performance)
-# shifted at the computational methods section for 6,000 lines. They have Adaboost twice, at computational_method_performance, so shifted beyond that line. Bonus is that we don't want that crap! 
+# shifted at the computational methods section for ~6,000 lines. They have Adaboost twice, at computational_method_performance, so shifted beyond that line. Bonus is that we don't want that crap! 
 
 ```
 
@@ -280,11 +282,57 @@ skim.drug.tbl <- skim(drug.tbl)
 Filter to remove any computational methods and clean tibble
 
 ```{r}
+
+# several rows are broken, we can remove those with: 
+## broken where AdaBoost Classifier is copied twice into computational_method_performance
+
+drug.tbl <- drug.tbl %>% filter(genome_drug.computational_method_performance != "AdaBoost Classifier" | is.na(genome_drug.computational_method_performance))
+
+unique(drug.tbl$genome_drug.laboratory_typing_method)
+# we want to change "missing" to "NA" because they are the same
+
+drug.tbl <- drug.tbl %>% 
+  mutate(genome_drug.laboratory_typing_method = na_if(genome_drug.laboratory_typing_method, "missing"))
+
+unique(drug.tbl$genome_drug.laboratory_typing_method)
+
+# remove NAs for drug resistance phenotypes
+unique(drug.tbl$genome_drug.resistant_phenotype)
+# unfortunately there are some NAs here which we cannot use
+
+drug.tbl <- drug.tbl %>% 
+  filter(!is.na(genome_drug.resistant_phenotype))
+
+unique(drug.tbl$genome_drug.resistant_phenotype)
+# we also want to change "nonsusceptible" to "resistant" 
+
+drug.tbl <- drug.tbl %>% 
+  mutate(genome_drug.resistant_phenotype = case_when(genome_drug.resistant_phenotype == "Nonsusceptible" ~ "Resistant", 
+                                                     .default = genome_drug.resistant_phenotype))
+
+# remove any columns with <5% completion
+
+mostly_na_columns <- skim.drug.tbl %>% 
+    filter(complete_rate < 0.05) %>% # select variables that have <5% completion
+  pull(skim_variable)
+
+mostly_na_columns
+# 6 columns
+
+drug.tbl <- drug.tbl %>% 
+  select(-any_of(mostly_na_columns))
+
+length(mostly_na_columns)
+length(colnames(drug.tbl))
+colnames(drug.tbl)
+
+
+unique(drug.tbl$genome_drug.resistant_phenotype)
 unique(drug.tbl$genome_drug.computational_method)
 # we want to remove anything that is "AdaBoost Classifier" 
 
 # remove anything computational
-filt.drug.tbl <- test.drug.tbl %>%
+filt.drug.tbl <- drug.tbl %>%
   filter(genome_drug.computational_method != "AdaBoost Classifier" | is.na(genome_drug.computational_method))
 # this removed 200,000 lines
 
@@ -297,29 +345,6 @@ unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
 filt.drug.tbl <- filt.drug.tbl %>% 
   filter(genome_drug.laboratory_typing_method != "Computational Prediction" | is.na(genome_drug.laboratory_typing_method))
 
-unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
-# we want to change "missing" to "NA" because they are the same
-
-filt.drug.tbl <- filt.drug.tbl %>% 
-  mutate(genome_drug.laboratory_typing_method = na_if(genome_drug.laboratory_typing_method, "missing"))
-
-unique(filt.drug.tbl$genome_drug.laboratory_typing_method)
-
-# remove NAs for drug resistance phenotypes
-unique(filt.drug.tbl$genome_drug.resistant_phenotype)
-# unfortunately there are some NAs here which we cannot use
-
-filt.drug.tbl <- filt.drug.tbl %>% 
-  filter(!is.na(genome_drug.resistant_phenotype))
-
-unique(filt.drug.tbl$genome_drug.resistant_phenotype)
-# we also want to change "nonsusceptible" to "resistant" 
-
-filt.drug.tbl <- filt.drug.tbl %>% 
-  mutate(genome_drug.resistant_phenotype = case_when(genome_drug.resistant_phenotype == "Nonsusceptible" ~ "Resistant", 
-                                                     .default = genome_drug.resistant_phenotype))
-
-unique(filt.drug.tbl$genome_drug.resistant_phenotype)
 
 # do any of the columns only have NA?
 
@@ -545,7 +570,7 @@ filt.drug.tbl %>%
 # 1280 taxonID for S.a
 
 # let's also look at the original raw data
-test.drug.tbl %>% 
+drug.tbl %>% 
   group_by(id_input) %>% 
   summarize(uniq.genomes = length(unique(genome.genome_id)), uniq.anti = length(unique(genome_drug.antibiotic)), rows = n())
 
@@ -560,8 +585,348 @@ test.drug.tbl %>%
 
 # can I combine now? 
 
-joined.tbl <- inner_join(filt.drug.tbl, data.tbl, relationship = "many-to-many")
+joined.tbl <- inner_join(drug.tbl, data.tbl, relationship = "many-to-many")
 
-test <- inner_join(test.drug.tbl, data.tbl, relationship = "many-to-many")
 
+```
+
+### Combined Table Analysis
+
+```{r}
+# Fix up evidence column
+
+joined.tbl$genome_drug.laboratory_typing_method %>% unique()
+# Computational Prediction shouldn't be laboratory typing 
+
+lab.methods <- c("MIC", "Broth dilution", "Disk diffusion", "Agar dilution")
+# "Broth dilution, Disk diffusion, MIC, Agar dilution" are all labortory methods
+
+
+joined.tbl %>% filter(is.na(genome_drug.evidence)) %>% pull(genome_drug.laboratory_typing_method) %>% unique()
+# NA in genome_drug.evidence still has computational prediction, MIC, disk diffusion, etc
+
+joined.tbl %>% filter(genome_drug.evidence == "Laboratory Method") %>% pull(genome_drug.laboratory_typing_method) %>% unique()
+
+joined.tbl <- joined.tbl %>% 
+  mutate(genome_drug.evidence = case_when(
+    genome_drug.laboratory_typing_method %in% lab.methods ~ "Laboratory Method", 
+  genome_drug.laboratory_typing_method == "Computational Prediction" ~ "Computational Method",
+  .default = genome_drug.evidence
+  ))
+
+joined.tbl %>% filter(is.na(genome_drug.evidence)) %>% pull(genome_drug.laboratory_typing_method) %>% unique()
+# now all NAs
+
+joined.tbl %>% filter(genome_drug.evidence == "Laboratory Method") %>% pull(genome_drug.laboratory_typing_method) %>% unique()
+# now no computational prediction
+
+# also want to have just the Species info 
+
+skim.joined.tbl <- skim(joined.tbl)
+
+```
+
+**Table summaries of joined table**
+
+```{r}
+# different summaries of the table 
+joined.tbl %>% group_by(genome_drug.resistant_phenotype) %>% distinct(genome.genome_id) %>% count()
+joined.tbl %>% group_by(genome_drug.evidence) %>% distinct(genome.genome_id) %>% count()
+joined.tbl %>% group_by(genome.genome_status) %>% distinct(genome.genome_id) %>% count()
+joined.tbl %>% group_by(genome.genome_quality) %>% distinct(genome.genome_id) %>% count()
+joined.tbl %>% group_by(genome.geographic_location, genome.isolation_country) %>% distinct(genome.genome_id) %>% count()
+```
+
+**Prepare table for visualizations**
+
+```{r}
+# initial table
+plot.tbl <- joined.tbl %>% filter(genome_drug.evidence == "Laboratory Method") %>%
+  select(genome.genome_id, genome_drug.antibiotic, genome_drug.resistant_phenotype, genome_drug.laboratory_typing_method, genome.isolation_country, genome.collection_year, genome.host_common_name, id_input.type, genome.species) %>% 
+  distinct()
+
+
+
+# read the file with antibiotic classes
+antibiotics_classes <- read_excel("/projects/kterwelp@xsede.org/20240917_BV-BRC-genomes/metadata/antibiotics_classes2.0.xlsx")
+
+# add the class column
+plot.tbl <- merge(plot.tbl, antibiotics_classes, by = "genome_drug.antibiotic", all.x = T)
+
+# check that there are no NA antibiotic classes 
+plot.tbl %>% filter(is.na(genome_drug.antibiotic_class)) %>% pull(genome_drug.antibiotic) %>% unique()
+# if there are, add those to the excel file and repeat
+
+year.tbl <- plot.tbl %>% dplyr::filter(!is.na(genome.collection_year)) 
+
+summary.year <- year.tbl %>% group_by(genome.species, genome_drug.antibiotic_class, genome_drug.resistant_phenotype, genome.collection_year) %>% summarise(count = n())
+summary.year
+
+top.drugs.tbl <- summary.year %>% ungroup() %>%
+  group_by(genome.species, genome_drug.antibiotic_class) %>% 
+  summarise(cases = sum(count))
+
+top.drugs.tbl %>% arrange(desc(cases))
+
+top.drugs.sau <- top.drugs.tbl %>% 
+  filter(genome.species == "Staphylococcus aureus") %>% 
+  arrange(desc(cases)) %>% 
+  slice(1:7) %>% # take top 7 most prevalent antibiotic classes
+  pull(genome_drug.antibiotic_class)
+
+top.drugs.pae <- top.drugs.tbl %>% 
+  filter(genome.species == "Pseudomonas aeruginosa") %>% 
+  arrange(desc(cases)) %>% 
+  slice(1:7) %>% # take top 7 most prevalent antibiotic classes
+  pull(genome_drug.antibiotic_class)
+
+top.drugs <- union(top.drugs.pae, top.drugs.sau)
+top.drugs
+# top most prevalent drugs used for both species
+
+# edit summary.year to only include top drugs
+## anything not in the top drugs labeled "others"
+summary.year <- summary.year %>% 
+  mutate(genome_drug.antibiotic_class = case_when(genome_drug.antibiotic_class %in% top.drugs ~genome_drug.antibiotic_class, 
+                                                  .default = "others"))
+```
+
+**Visualizations**
+
+Yearwise Plot of Resistance Data for top 10 Antibiotic Class
+
+```{r}
+# Plot the yearwise Resistant data for different antibiotic class 
+p <- ggplot(summary.year %>% 
+              filter(genome_drug.resistant_phenotype == "Resistant",
+                     genome.species == "Pseudomonas aeruginosa"), aes(x = genome.collection_year, y = count, colour = genome_drug.antibiotic_class)) 
+p <- p + 
+  geom_line() + geom_point() + 
+  labs(title = "Resistant Phenotype Distribution Over the Years by Antibiotic",
+       x = "Year",
+       y = "Number of Cases",
+       colour = "Antibiotics") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + theme(legend.position = "bottom", 
+                          legend.text = element_text(size = 5), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14))
+p
+
+
+p <- ggplot(summary.year %>% 
+              filter(genome_drug.resistant_phenotype == "Resistant", 
+                     genome.species == "Staphylococcus aureus"), aes(x = genome.collection_year, y = count, colour = genome_drug.antibiotic_class)) 
+p <- p + 
+  geom_line() + geom_point() + 
+  labs(title = "Resistant Phenotype Distribution Over the Years by Antibiotic",
+       x = "Year",
+       y = "Number of Cases",
+       colour = "Antibiotics") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + theme(legend.position = "bottom", 
+                          legend.text = element_text(size = 5), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14))
+p
+
+```
+
+```{r}
+# Summarise the data as antiotics
+summary.drugs <- plot.tbl %>% 
+  group_by(genome.species, genome_drug.antibiotic, genome_drug.antibiotic_class, genome_drug.resistant_phenotype) %>% summarise(count = n())
+summary.drugs
+
+
+top.drugs.tbl <- summary.drugs %>% ungroup() %>%
+  group_by(genome.species, genome_drug.antibiotic_class) %>% 
+  summarise(cases = sum(count))
+
+top.drugs.tbl %>% arrange(desc(cases))
+
+top.drugs.sau <- top.drugs.tbl %>% 
+  filter(genome.species == "Staphylococcus aureus") %>% 
+  arrange(desc(cases)) %>% 
+  slice(1:4) %>% # take top 4 most prevalent antibiotic classes
+  pull(genome_drug.antibiotic_class)
+
+top.drugs.pae <- top.drugs.tbl %>% 
+  filter(genome.species == "Pseudomonas aeruginosa") %>% 
+  arrange(desc(cases)) %>% 
+  slice(1:4) %>% # take top 4 most prevalent antibiotic classes
+  pull(genome_drug.antibiotic_class)
+
+top.drugs <- union(top.drugs.pae, top.drugs.sau)
+top.drugs
+
+
+# Barplot of three phenotypes coloured on antibiotics
+ggplot(summary.drugs %>% 
+         filter(genome_drug.antibiotic_class %in% top.drugs,
+                genome.species == "Pseudomonas aeruginosa"), aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic_class)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "Phenotype Counts by Antibiotic",
+       x = "Phenotype",
+       y = "Number of Cases",
+       fill = "Antibiotic") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + 
+  theme(legend.position = "bottom", legend.position.inside =  c(.75, .75), 
+        legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) 
+
+
+ggplot(summary.drugs %>% 
+         filter(genome_drug.antibiotic_class %in% top.drugs,
+                genome.species == "Staphylococcus aureus"), aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic_class)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "Phenotype Counts by Antibiotic",
+       x = "Phenotype",
+       y = "Number of Cases",
+       fill = "Antibiotic") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + 
+  theme(legend.position = "bottom", legend.position.inside =  c(.75, .75), 
+        legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) 
+
+# From these plots: aminoglycosides, cephalosporins, and fluoroquinolones are pretty popular for both species. 
+
+```
+
+**Plots for each of the top 3 drug classes**
+
+**Cephalosporins**
+
+```{r}
+summary.drugs
+# lets take the top 3: aminoglycosides, cephalosporins, fluorquinolones
+
+p.tbl <- summary.drugs %>% 
+  filter(genome_drug.antibiotic_class == "cephalosporins", 
+         count > 10) # removing anything w/ less than 10 results
+
+# what's the top drugs used for each
+
+p.tbl$genome_drug.antibiotic %>% unique() %>% length()
+# 8 antibiotics total in this class
+
+p.tbl %>% ggplot(aes(x = genome.species, y = count, fill = genome_drug.antibiotic)) +
+      geom_bar(position="stack", stat="identity") +
+  theme_minimal() + 
+  theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) +
+    labs(title = "Antibiotic Counts of Cephalosporins",
+       x = "Species",
+       y = "Number of Cases",
+       fill = "Antibiotic") 
+
+  # looks like they generally are different antibiotics used
+```
+
+**Aminoglycosides**
+
+```{r}
+
+p.tbl <- summary.drugs %>% 
+  filter(genome_drug.antibiotic_class == "aminoglycosides", 
+         count > 10) # removing anything w/ less than 10 results
+
+# what's the top drugs used for each
+
+p.tbl$genome_drug.antibiotic %>% unique() %>% length()
+# 8 antibiotics total in this class
+
+p.tbl %>% ggplot(aes(x = genome.species, y = count, fill = genome_drug.antibiotic)) +
+      geom_bar(position="stack", stat="identity") +
+  theme_minimal() + 
+  theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) +
+    labs(title = "Antibiotic Counts of Aminoglycosides",
+       x = "Species",
+       y = "Number of Cases",
+       fill = "Antibiotic") 
+
+# Gentamicin is preferred for S.auerues
+# Amikacin/Tobramycin is used for P.aerugionsa 
+## basically no Amikacin for S. aureus 
+```
+
+**Fluroquinolones**
+
+```{r}
+
+p.tbl <- summary.drugs %>% 
+  filter(genome_drug.antibiotic_class == "fluoroquinolones", 
+         count > 10) # removing anything w/ less than 10 results
+
+# what's the top drugs used for each
+
+p.tbl$genome_drug.antibiotic %>% unique() %>% length()
+# 8 antibiotics total in this class
+
+p.tbl %>% ggplot(aes(x = genome.species, y = count, fill = genome_drug.antibiotic)) +
+      geom_bar(position="stack", stat="identity") +
+  theme_minimal() + 
+  theme(legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) +
+    labs(title = "Antibiotic Counts of Fluoroquinolones",
+       x = "Species",
+       y = "Number of Cases",
+       fill = "Antibiotic") 
+
+# Cipro or Levo used for P.ae
+# Cipro preferred S.au
+## no Moxi in P.ae 
+```
+
+**Ciprofloxacin vs Levofloxacin**
+
+```{r}
+
+p.tbl <- summary.drugs %>% 
+  filter(genome_drug.antibiotic %in% c("ciprofloxacin", "levofloxacin"))
+
+ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "Phenotype Counts by Antibiotic",
+       x = "Phenotype",
+       y = "Number of Cases",
+       fill = "Antibiotic") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + 
+  theme(legend.position = "bottom", legend.position.inside =  c(.75, .75), 
+        legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) 
+         
+# not very balanced for S.auerus : Levo combo 
+
+```
+
+**Aminoglycosides without** Amikacin
+
+```{r}
+p.tbl <- summary.drugs %>% 
+  filter(genome_drug.antibiotic_class == "aminoglycosides",
+         genome_drug.antibiotic != "amikacin") # removing anything w/ less than 10 results
+
+ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "Phenotype Counts by Antibiotic",
+       x = "Phenotype",
+       y = "Number of Cases",
+       fill = "Antibiotic") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + 
+  theme(legend.position = "bottom", legend.position.inside =  c(.75, .75), 
+        legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) 
+
+
+# this graph is hard to see, clearly gentamicin is preferred by S.aureus
+
+p.tbl <- summary.drugs %>% 
+  filter(genome_drug.antibiotic_class == "aminoglycosides", 
+         !(genome_drug.antibiotic %in% c("amikacin", "gentamicin"))) # removing anything w/ less than 10 results
+
+ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "Phenotype Counts by Antibiotic",
+       x = "Phenotype",
+       y = "Number of Cases",
+       fill = "Antibiotic") +
+  facet_wrap(~ genome.species) +
+  theme_minimal() + 
+  theme(legend.position = "bottom", legend.position.inside =  c(.75, .75), 
+        legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) 
 ```
