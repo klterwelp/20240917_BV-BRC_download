@@ -898,7 +898,8 @@ ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_
 
 ```{r}
 p.tbl <- summary.drugs %>% 
-  filter(genome_drug.antibiotic_class == "aminoglycosides",
+  filter(genome_drug.antibiotic_class == "aminoglycosides", 
+         count > 10, 
          genome_drug.antibiotic != "amikacin") # removing anything w/ less than 10 results
 
 ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic)) +
@@ -917,6 +918,7 @@ ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_
 
 p.tbl <- summary.drugs %>% 
   filter(genome_drug.antibiotic_class == "aminoglycosides", 
+         count > 10, 
          !(genome_drug.antibiotic %in% c("amikacin", "gentamicin"))) # removing anything w/ less than 10 results
 
 ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_drug.antibiotic)) +
