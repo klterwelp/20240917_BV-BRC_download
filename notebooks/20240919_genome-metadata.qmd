@@ -642,7 +642,7 @@ joined.tbl %>% group_by(genome.geographic_location, genome.isolation_country) %>
 ```{r}
 # initial table
 plot.tbl <- joined.tbl %>% filter(genome_drug.evidence == "Laboratory Method") %>%
-  select(genome.genome_id, genome_drug.antibiotic, genome_drug.resistant_phenotype, genome_drug.laboratory_typing_method, genome.isolation_country, genome.collection_year, genome.host_common_name, id_input.type, genome.species) %>% 
+  select(genome.genome_id, genome_drug.antibiotic, genome_drug.resistant_phenotype, genome_drug.laboratory_typing_method, genome.isolation_country, genome.collection_year, genome.host_common_name, genome.species) %>% 
   distinct()
 
 
@@ -931,4 +931,13 @@ ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_
   theme_minimal() + 
   theme(legend.position = "bottom", legend.position.inside =  c(.75, .75), 
         legend.text = element_text(size = 14), legend.title = element_text(size = 14), axis.title = element_text(size = 14), axis.text = element_text(size = 14)) 
+```
+
+## Downloading genomes
+
+### List of genomes
+
+```{r}
+
+plot.tbl
 ```
