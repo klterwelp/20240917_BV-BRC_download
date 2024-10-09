@@ -47,6 +47,10 @@ library(tidyverse)
 # ggplot for visualizing cleaned tibble
 library(skimr)
 # for creating quick summary tables
+library(curl)
+# download genomes from BV BRC
+library(rentrez)
+# download genomes from NCBI
 ```
 
 ### Import data and clean
@@ -642,7 +646,7 @@ joined.tbl %>% group_by(genome.geographic_location, genome.isolation_country) %>
 ```{r}
 # initial table
 plot.tbl <- joined.tbl %>% filter(genome_drug.evidence == "Laboratory Method") %>%
-  select(genome.genome_id, genome_drug.antibiotic, genome_drug.resistant_phenotype, genome_drug.laboratory_typing_method, genome.isolation_country, genome.collection_year, genome.host_common_name, genome.species) %>% 
+  select(genome.genome_id, genome_drug.antibiotic, genome_drug.resistant_phenotype, genome_drug.laboratory_typing_method, genome.isolation_country, genome.collection_year, genome.host_common_name, genome.species, genome.assembly_accession, genome.genbank_accessions) %>% 
   distinct()
 
 
@@ -939,5 +943,97 @@ ggplot(p.tbl, aes(x = genome_drug.resistant_phenotype, y = count, fill = genome_
 
 ```{r}
 
-plot.tbl
+#desired drug pairs: 
+## gentamicin and tobramycin
+## ciprofloxacin and levofloxacin
+
+drug.ls <- c("gentamicin", "tobramycin", "ciprofloxacin", "levofloxacin")
+genome.ls.tbl <- plot.tbl %>% 
+  filter(genome_drug.antibiotic %in% drug.ls) 
+
+genome.ls <- genome.ls.tbl %>% pull(genome.genome_id) %>% unique()
+# total 4367 genomes from both species 
+
+genome.acc.ls <- genome.ls.tbl %>% 
+  filter(!is.na(genome.assembly_accession)) %>% 
+           pull(genome.assembly_accession) %>% unique()
+# only 1195 genomes :/ , losing like a third
+## have to use this because ftp isn't working for bv-brc 
+```
+
+### Download genomes
+
+In the folder: [ftp://ftp.bvbrc.org/genomes/](ftp://ftp.bvbrc.org/genomes/511145.12)genome_id
+
+-   .fna: FASTA contig sequences
+
+-   .faa: FASTA protein sequence file
+
+-   .features.tab: All genomic features and related information in tab-delimited format
+
+-   .ffn: FASTA nucleotide sequences for genomic features, i.e. genes, RNAs, and other misc features
+
+-   .frn: FASTA nucleotide sequences for RNAs
+
+-   .gff: Genome annotations in GFF file format
+
+-   .pathway.tab: Metabolic pathway assignments in tab-delimited format
+
+-   .spgene.tab: Specialty gene assignements (i.e. AMR genes, virulance factors, essential genes, etc) in tab-delimited format
+
+-   .subsystem.tab: Subsystem assignments in tab-delimited format
+
+for i in `cat genome_ids.txt` do wget -qN "<ftp://ftp.bvbrc.org/genomes/>$i/$i.PATRIC.gff" wget -qN "<ftp://ftp.bvbrc.org/genomes/>$i/$i.fna" wget -qN "<ftp://ftp.bvbrc.org/genomes/>$i/$i.RefSeq.gff" done
+
+```{r}
+# download all genomes with accession numbers
+
+acc.ls.tbl <- genome.ls.tbl %>% 
+  filter(!is.na(genome.assembly_accession))
+
+  
+acc.ls.tbl %>% 
+  group_by(genome.species, genome_drug.antibiotic) %>% 
+  summarise(count_assemblies = length(unique(genome.assembly_accession)), count_accensions = length(unique(genome.genbank_accessions)))
+# list of expected genomes using NCBI database
+
+
+write_csv()
+
+```
+
+```{r}
+# download all genomes with genomeID
+
+dataFol <- "/projects/kterwelp@xsede.org/20240917_BV-BRC-genomes/data/"
+
+download.df <- lapply(genome.ls, function(genome_id) {
+  # generate file names
+  P.gff <- paste0("ftp://ftp.bvbrc.org/genomes/", genome_id, "/", genome_id, ".PATRIC.gff")
+  R.gff <- paste0("ftp://ftp.bvbrc.org/genomes/", genome_id, "/", genome_id, ".RefSeq.gff")
+  fna <- paste0("ftp://ftp.bvbrc.org/genomes/", genome_id, "/", genome_id, ".fna")
+  files <- c(P.gff = P.gff, R.gff = R.gff, fna = fna)
+  
+  # generate destination names
+  P.gff.dest <- paste0(dataFol, genome_id, ".PATRIC.gff")
+  R.gff.dest <- paste0(dataFol, genome_id, ".RefSeq.gff")
+  fna.dest <- paste0(dataFol, genome_id, ".fna")
+  dests <- c(P.gff.dest, R.gff.dest, fna.dest)
+  
+  #download files
+  download.df <- multi_download(urls = files, destfiles = dests)
+  ## multi_download generates a dataframe with error information for all files downloaded
+  
+  download.df <- download.df %>% 
+    mutate(genome.genome_id = genome_id, # add genome_id col 
+           file_type = case_when(grepl("PATRIC.gff", url) ~ "PATRIC.gff", 
+                                 grepl(".RefSeq.gff", url) ~ ".RefSeq.gff", 
+                                 grepl(".fna", url) ~ ".fna", 
+                                 .default = NA))
+  # add file_type col, can test which files are least likely to exist
+
+}) %>% 
+  bind_rows()
+
+
 ```
