@@ -1035,5 +1035,339 @@ download.df <- lapply(genome.ls, function(genome_id) {
 }) %>% 
   bind_rows()
 
+saveRDS(download.df, file = "download.RDS")
 
+```
+
+Not all the files downloaded, were there any patterns with that?
+
+```{r}
+
+# what kind of errors occurred 
+
+p <- download.df %>% 
+  group_by(error) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+# very very odd that Access denied num_files is not 3x uniq genomes
+# vast majority of errors are that the file does not exist 
+# 23 files had connection time out, maybe I could redownload those? 
+# NA: 10222 files downloaded first time
+```
+
+**Reattempt downloading "connection timeout" files**
+
+```{r}
+redownload.tbl <- download.df %>% 
+  filter(error %in% c("Connection timeout after 10001 ms", "Connection timeout after 10000 ms")) %>% 
+  select(url, destfile, error, file_type, genome.genome_id) %>% 
+  distinct()
+
+redownload.tbl
+# 23 files and their info
+
+redownloaded.df <- multi_download(urls = redownload.tbl$url, destfiles = redownload.tbl$destfile)
+
+# redownload success rate? 
+
+p <- redownloaded.df %>% 
+  group_by(success) %>% 
+  summarise( 
+    num_files = n_distinct(destfile))
+
+p
+# most files succ. redownloaded! yay! 
+# 18 successes, 5 false
+
+redownloaded.df$error %>% unique()
+# given file doesn't exist is why they didn't download this time
+
+```
+
+**Why are some of these genomes saying "Access denied"?**
+
+They should be public genomes....
+
+```{r}
+no.access.tbl <- download.df %>% 
+  filter(error %in% c("Access denied: 530")) %>% 
+  select(url, destfile, error, file_type, genome.genome_id) %>% 
+  distinct()
+
+no.acesss.ls <- no.access.tbl %>%
+  pull(genome.genome_id) %>% 
+  unique()
+
+length(no.acesss.ls)
+# 253 genomes have no access 
+
+# am I still be unable to download them? 
+
+no.access.redownload.df <- multi_download(urls = no.access.tbl$url, destfiles = no.access.tbl$destfile)
+
+p <- no.access.redownload.df %>% 
+  group_by(success) %>% 
+  summarise( 
+    num_files = n_distinct(destfile))
+
+p
+# most were able to be downloaded!
+
+no.access.redownload.df$error %>% unique()
+# now only "Given file does not exist" 
+
+```
+
+**Okay, if the other errors could be fixed by trying again, can this file doesn't exist error be fixed?**
+
+```{r}
+no.file.tbl <- download.df %>% 
+  filter(error %in% c("Given file does not exist")) %>% 
+  select(url, destfile, error, file_type, genome.genome_id) %>% 
+  distinct()
+
+# am I still be unable to download them? 
+
+no.file.redownload <- multi_download(urls = no.file.tbl$url, destfiles = no.file.tbl$destfile)
+
+p <- no.file.redownload %>% 
+  group_by(success) %>% 
+  summarise( 
+    num_files = n_distinct(destfile))
+
+p
+## nothing downloaded!
+
+```
+
+That would be too good I suppose!
+
+**Let's combine the redownloaded with the downloaded**
+
+```{r}
+
+# create table with updated download info for redownloaded files
+redownload.all <- bind_rows(no.access.redownload.df, redownloaded.df)
+
+# add columns  
+setdiff(colnames(download.df), colnames(redownload.all))
+redownload.all <- download.df %>% 
+  select(url, genome.genome_id, file_type) %>%
+  inner_join(redownload.all)
+
+# generate list of urls that were redownloaded
+redownload.ls <- redownload.all %>% pull(url)
+
+# replace rows from download.df with redownloaded files with info from redownloaded dfs
+new.download.df <- download.df %>% 
+  filter(!(url %in% redownload.ls)) %>% # only keep rows not in redownload ls
+  bind_rows(redownload.all) # add redownload table info
+```
+
+```{r}
+# did any of the successes actually fail? 
+
+# find the file size of all files downloaded
+download.ls <- list.files("data/", "*", full.names = TRUE)
+file_info.tbl <- file.info(download.ls)
+
+file_info.tbl <- file_info.tbl %>% 
+  mutate(destfile = gsub("data//", dataFol, rownames(file_info.tbl))) %>% 
+  mutate(size_kb = size/1024,
+         size_mb = size/(1024^2))# adjust size to human readable KB/MB
+
+# combine with genome metadata
+downloaded.genome.ls.tbl <- inner_join(new.download.df, genome.ls.tbl, relationship = "many-to-many", by = "genome.genome_id") 
+
+# combine with file metadata
+downloaded.genome.ls.tbl <- left_join(downloaded.genome.ls.tbl, file_info.tbl, by = "destfile") 
+
+downloaded.genome.ls.tbl %>% filter(success == TRUE) %>% pull(url) %>% unique() %>% length()
+# there were 10797 files downloaded, after reattempt
+# some have a size of 0bytes
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter to only successes
+  ggplot(aes(x = file_type, y = size_kb)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "File size by file type",
+       x = "File Type",
+       y = "Size (KB)")
+  
+p
+
+# it looks like .RefSeq.gff is primarily 0bytes, I wouldn't consider that "successful" 
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter by success
+  filter(file_type == ".RefSeq.gff") %>% 
+  ggplot(aes(x = size_kb)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "File size distribution for RefSeq.gff files",
+       x = "Size (KB)",
+       y = "Count")
+p
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter by success
+  filter(file_type == "PATRIC.gff") %>% 
+  ggplot(aes(x = size_kb)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "File size distribution for PATRIC.gff files",
+       x = "Size (KB)",
+       y = "Count")
+p
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter by success
+  filter(file_type == ".fna") %>% 
+  ggplot(aes(x = size_kb)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "File size distribution for fna files",
+       x = "Size (KB)",
+       y = "Count")
+p
+
+
+# I'll reclassify anything under 100 KB as unsuccessful 
+
+downloaded.genome.ls.tbl <- downloaded.genome.ls.tbl %>% 
+  mutate(success = case_when(
+    success == TRUE & size_kb > 100 ~ TRUE, 
+    .default = FALSE
+  ))
+
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter to only successes
+  ggplot(aes(x = file_type, y = size_kb)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "File size by file type",
+       x = "File Type",
+       y = "Size (KB)")
+  
+p
+
+# now RefSeq and PATRIC gffs are around the same size! 
+
+
+# table of how many successes / combo (antibiotic, species)
+
+download.sum.tbl <- downloaded.genome.ls.tbl %>% 
+  group_by(genome_drug.antibiotic, genome.species, success) %>% 
+  summarise(uniq.genomes = n_distinct(genome.genome_id), num_files = n_distinct(destfile))
+
+download.sum.tbl
+
+
+# does the file type matter for fail/success? 
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(file_type, success) %>% 
+    summarise(uniq.genomes = n_distinct(genome.genome_id), num_files = n_distinct(destfile))
+
+p <- p %>% 
+  ggplot(aes(x = success, y = num_files, fill = file_type)) +
+      geom_bar(position="stack", stat="identity") +
+      labs(title = "File type impacts success rate",
+       x = "Success",
+       y = "Number of files",
+       fill = "File Type")
+p
+
+# most RefSeq files fail, while an equal proportion of fna + PATRIC succeed/fail 
+#(mostly succeed) 
+
+# Does RefSeq download depend on accension # availability? 
+p <- downloaded.genome.ls.tbl %>% 
+  filter(file_type == ".RefSeq.gff") %>% 
+  mutate(has.accension = case_when(is.na(genome.assembly_accession) ~ FALSE, 
+                                   .default = TRUE)) %>% 
+  group_by(success, has.accension) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile), 
+    num.accs = n_distinct(genome.assembly_accession, na.rm = TRUE))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = success, y = uniq.genomes, fill = has.accension)) +
+      geom_bar(position="stack", stat="identity") +
+      labs(title = "Most RefSeq files that fail to download lack accensions",
+       x = "Success",
+       y = "Number of genomes",
+       fill = "Has Accension")
+p
+
+
+# does the species matter for fail/success? 
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(genome.species, success) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = genome.species, y = num_files, fill = success)) +
+  geom_bar(position = "stack", stat = "identity") +
+      labs(title = "Even success rate by species",
+       x = "Species",
+       y = "Number of files",
+       fill = "Success")
+p
+  
+## more s.aureus fails than p.ae
+  
+# does antibiotic matter for fail / success? 
+
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(genome_drug.antibiotic, success) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = genome_drug.antibiotic, y = num_files, fill = success)) +
+  geom_bar(position = "stack", stat = "identity") +
+      labs(title = "Success rate by antibiotic",
+       x = "Antibiotic",
+       y = "Number of files",
+       fill = "Success")
+p
+
+## more gentamcin/cipro fail (maybe because more s.aureus?)
+
+# does the year matter for fail/success 
+
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(genome.collection_year, success) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = genome.collection_year, y = uniq.genomes, group = success)) +
+  geom_line(aes(color = success)) +
+      labs(title = "Success rate by year",
+       x = "Year of genome Collection",
+       y = "Number of genomes",
+       color = "Success")
+p
+
+# appear to generally match each other
 ```
