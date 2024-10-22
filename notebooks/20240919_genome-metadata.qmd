@@ -998,8 +998,6 @@ acc.ls.tbl %>%
 # list of expected genomes using NCBI database
 
 
-write_csv()
-
 ```
 
 ```{r}
@@ -1181,14 +1179,15 @@ file_info.tbl <- file_info.tbl %>%
          size_mb = size/(1024^2))# adjust size to human readable KB/MB
 
 # combine with genome metadata
-downloaded.genome.ls.tbl <- inner_join(new.download.df, genome.ls.tbl, relationship = "many-to-many", by = "genome.genome_id") 
+post.d.genome.ls.tbl <- inner_join(new.download.df, genome.ls.tbl, relationship = "many-to-many", by = "genome.genome_id") 
 
 # combine with file metadata
-downloaded.genome.ls.tbl <- left_join(downloaded.genome.ls.tbl, file_info.tbl, by = "destfile") 
+downloaded.genome.ls.tbl <- left_join(post.d.genome.ls.tbl, file_info.tbl, by = "destfile") 
 
 downloaded.genome.ls.tbl %>% filter(success == TRUE) %>% pull(url) %>% unique() %>% length()
 # there were 10797 files downloaded, after reattempt
 # some have a size of 0bytes
+
 
 p <- downloaded.genome.ls.tbl %>% 
   filter(success == TRUE) %>% # filter to only successes
@@ -1370,4 +1369,234 @@ p <- p %>%
 p
 
 # appear to generally match each other
+```
+
+```{r}
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter to only successes
+  ggplot(aes(x = file_type, y = size_kb)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "File size by file type",
+       x = "File Type",
+       y = "Size (KB)")
+  
+p
+
+# it looks like .RefSeq.gff is primarily 0bytes, I wouldn't consider that "successful" 
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter by success
+  filter(file_type == ".RefSeq.gff") %>% 
+  ggplot(aes(x = size_kb)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "File size distribution for RefSeq.gff files",
+       x = "Size (KB)",
+       y = "Count")
+p
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter by success
+  filter(file_type == "PATRIC.gff") %>% 
+  ggplot(aes(x = size_kb)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "File size distribution for PATRIC.gff files",
+       x = "Size (KB)",
+       y = "Count")
+p
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter by success
+  filter(file_type == ".fna") %>% 
+  ggplot(aes(x = size_kb)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "File size distribution for fna files",
+       x = "Size (KB)",
+       y = "Count")
+p
+
+
+# I'll reclassify anything under 100 KB as unsuccessful 
+
+downloaded.genome.ls.tbl <- downloaded.genome.ls.tbl %>% 
+  mutate(success = case_when(
+    success == TRUE & size_kb > 100 ~ TRUE, 
+    .default = FALSE
+  ))
+
+
+p <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% # filter to only successes
+  ggplot(aes(x = file_type, y = size_kb)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(title = "File size by file type",
+       x = "File Type",
+       y = "Size (KB)")
+  
+p
+
+# now RefSeq and PATRIC gffs are around the same size! 
+
+
+# table of how many successes / combo (antibiotic, species)
+
+download.sum.tbl <- downloaded.genome.ls.tbl %>% 
+  group_by(genome_drug.antibiotic, genome.species, success) %>% 
+  summarise(uniq.genomes = n_distinct(genome.genome_id), num_files = n_distinct(destfile))
+
+download.sum.tbl
+
+
+# does the file type matter for fail/success? 
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(file_type, success) %>% 
+    summarise(uniq.genomes = n_distinct(genome.genome_id), num_files = n_distinct(destfile))
+
+p <- p %>% 
+  ggplot(aes(x = success, y = num_files, fill = file_type)) +
+      geom_bar(position="stack", stat="identity") +
+      labs(title = "File type impacts success rate",
+       x = "Success",
+       y = "Number of files",
+       fill = "File Type")
+p
+
+# most RefSeq files fail, while an equal proportion of fna + PATRIC succeed/fail 
+#(mostly succeed) 
+
+# Does RefSeq download depend on accension # availability? 
+p <- downloaded.genome.ls.tbl %>% 
+  filter(file_type == ".RefSeq.gff") %>% 
+  mutate(has.accension = case_when(is.na(genome.assembly_accession) ~ FALSE, 
+                                   .default = TRUE)) %>% 
+  group_by(success, has.accension) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile), 
+    num.accs = n_distinct(genome.assembly_accession, na.rm = TRUE))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = success, y = uniq.genomes, fill = has.accension)) +
+      geom_bar(position="stack", stat="identity") +
+      labs(title = "Most RefSeq files that fail to download lack accensions",
+       x = "Success",
+       y = "Number of genomes",
+       fill = "Has Accension")
+p
+
+
+# does the species matter for fail/success? 
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(genome.species, success) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = genome.species, y = num_files, fill = success)) +
+  geom_bar(position = "stack", stat = "identity") +
+      labs(title = "Even success rate by species",
+       x = "Species",
+       y = "Number of files",
+       fill = "Success")
+p
+  
+## more s.aureus fails than p.ae
+  
+# does antibiotic matter for fail / success? 
+
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(genome_drug.antibiotic, success) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = genome_drug.antibiotic, y = num_files, fill = success)) +
+  geom_bar(position = "stack", stat = "identity") +
+      labs(title = "Success rate by antibiotic",
+       x = "Antibiotic",
+       y = "Number of files",
+       fill = "Success")
+p
+
+## more gentamcin/cipro fail (maybe because more s.aureus?)
+
+# does the year matter for fail/success 
+
+p <- downloaded.genome.ls.tbl %>% 
+  group_by(genome.collection_year, success) %>% 
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id), 
+    num_files = n_distinct(destfile))
+
+p
+
+p <- p %>% 
+  ggplot(aes(x = genome.collection_year, y = uniq.genomes, group = success)) +
+  geom_line(aes(color = success)) +
+      labs(title = "Success rate by year",
+       x = "Year of genome Collection",
+       y = "Number of genomes",
+       color = "Success")
+p
+
+# appear to generally match each other
+
+# total unique genomes downloaded for drug-bug combo
+p.tbl <- downloaded.genome.ls.tbl %>% 
+  group_by(genome.species, genome_drug.antibiotic, success) %>%
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id)
+  )
+
+
+  p <- p.tbl %>% 
+  ggplot(aes(x = genome_drug.antibiotic, y = uniq.genomes, fill = success)) +
+  geom_bar(position = "stack", stat = "identity") +
+    facet_wrap(~genome.species) +
+      labs(title = "Success rate by antibiotic",
+       x = "Antibiotic",
+       y = "Number of genomes",
+       fill = "Success")
+p
+
+
+p.tbl <- downloaded.genome.ls.tbl %>% 
+  group_by(genome.species, genome_drug.antibiotic_class, success) %>%
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id)
+  )
+
+
+  p <- p.tbl %>% 
+  ggplot(aes(x = genome_drug.antibiotic_class, y = uniq.genomes, fill = success)) +
+  geom_bar(position = "stack", stat = "identity") +
+    facet_wrap(~genome.species) +
+      labs(title = "Success rate by antibiotic",
+       x = "Antibiotic Class",
+       y = "Number of genomes",
+       fill = "Success")
+p
+  
+
+
+p.tbl <- downloaded.genome.ls.tbl %>% 
+  filter(success == TRUE) %>% 
+    group_by(genome.species, genome_drug.antibiotic) %>%
+  summarise(
+    uniq.genomes = n_distinct(genome.genome_id)
+  )
+  
 ```
